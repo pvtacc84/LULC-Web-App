@@ -122,18 +122,24 @@ function getImageryForYear(year) {
 var appState = {
   model: null,
   lulcCollection: null,
+  futureLulcCollection: null,
   currentLulc: null,
   currentImage: null,
   trainingData: null,
   testData: null,
   referenceImage: null,
   bandNames: null,
-  trendData: null
+  trendData: null,
+  futureValidation: null
 };
 
 // UI Setup
 var mainPanel = ui.Panel({ style:{ width:'400px', padding:'10px', backgroundColor:'#f9f9f9' }});
 mainPanel.add(ui.Label({ value:'🌍 Multi-Temporal LULC App', style:{ fontWeight:'bold', fontSize:'24px', margin:'10px 0 10px 10px', color:'#2c3e50' }}));
+mainPanel.add(ui.Label({
+  value:'Workflow Alignment: ERDAS IMAGINE + Google Earth Engine',
+  style:{fontWeight:'bold', fontSize:'12px', margin:'0 10px 10px 10px', color:'#34495e'}
+}));
 var accordion = ui.Panel({ style:{ margin:'0 5px' }});
 mainPanel.add(accordion);
 
@@ -284,10 +290,37 @@ accordion.add(ui.Panel([panel_5_title, panel_5_content],
   margin:'5px 0'
 }));
 
-// Panel 6: Inspector & Export
-var panel_6_title = ui.Label('6. Inspector & Export', {fontWeight:'bold', fontSize:'16px', margin:'5px 0', color:'#34495e'});
+// Panel 6: Future Prediction
+var panel_6_title = ui.Label('6. Future Prediction (2030/2040/2050)', {fontWeight:'bold', fontSize:'16px', margin:'5px 0', color:'#34495e'});
 var panel_6_content = ui.Panel();
 panel_6_content.style().set('shown', false);
+
+var predictionStatus = ui.Label('Generate future predictions after training the model.', {margin:'5px 10px'});
+var predictionYearSelect = ui.Select({
+  items:['2030', '2040', '2050'],
+  value:'2030',
+  style:{margin:'5px 10px', stretch:'horizontal'}
+});
+var generatePredictionButton = ui.Button('Generate Predictions', generateFuturePredictions, false, {width:'90%', margin:'5px auto'});
+var showPredictionButton = ui.Button('Show Predicted Map', showFuturePrediction, false, {width:'90%', margin:'5px auto', backgroundColor:'#8e44ad', color:'white'});
+var predictionStatsPanel = ui.Panel([ui.Label('No prediction selected.')], null, {margin:'5px 10px'});
+
+panel_6_content.add(predictionStatus);
+panel_6_content.add(ui.Label('Select Prediction Year:'));
+panel_6_content.add(predictionYearSelect);
+panel_6_content.add(generatePredictionButton);
+panel_6_content.add(showPredictionButton);
+panel_6_content.add(ui.Label('📊 Predicted Area Statistics', {fontWeight:'bold', margin:'5px 10px'}));
+panel_6_content.add(predictionStatsPanel);
+
+accordion.add(ui.Panel([panel_6_title, panel_6_content], ui.Panel.Layout.flow('vertical'), {
+  backgroundColor:'#ecf0f1', padding:'8px', border:'1px solid #bdc3c7', margin:'5px 0'
+}));
+
+// Panel 7: Inspector & Export
+var panel_7_title = ui.Label('7. Inspector & Export', {fontWeight:'bold', fontSize:'16px', margin:'5px 0', color:'#34495e'});
+var panel_7_content = ui.Panel();
+panel_7_content.style().set('shown', false);
 
 var inspectorPanel = ui.Panel([ui.Label('Click on map for pixel info.')], null, {margin:'5px 10px'});
 var exportClassSelect = ui.Select({items:names, value:'Urban Area', style:{margin:'5px 10px', stretch:'horizontal'}});
@@ -295,16 +328,16 @@ var exportVectorButton = ui.Button('Export Class as Vector (Shapefile)', exportV
 var exportImageButton  = ui.Button('Export Current LULC Image (GeoTIFF)',   exportImage,  false, {width:'90%', margin:'5px auto'});
 var exportVideoButton  = ui.Button('Export Time-Lapse Video (GIF)',          exportVideo,  false, {width:'90%', margin:'5px auto'});
 
-panel_6_content.add(ui.Label('Pixel Inspector', {fontWeight:'bold', margin:'5px 10px'}));
-panel_6_content.add(inspectorPanel);
-panel_6_content.add(ui.Label('Export Tools', {fontWeight:'bold', margin:'5px 10px'}));
-panel_6_content.add(ui.Label('Select class to export as vector:'));
-panel_6_content.add(exportClassSelect);
-panel_6_content.add(exportVectorButton);
-panel_6_content.add(exportImageButton);
-panel_6_content.add(exportVideoButton);
+panel_7_content.add(ui.Label('Pixel Inspector', {fontWeight:'bold', margin:'5px 10px'}));
+panel_7_content.add(inspectorPanel);
+panel_7_content.add(ui.Label('Export Tools', {fontWeight:'bold', margin:'5px 10px'}));
+panel_7_content.add(ui.Label('Select class to export as vector:'));
+panel_7_content.add(exportClassSelect);
+panel_7_content.add(exportVectorButton);
+panel_7_content.add(exportImageButton);
+panel_7_content.add(exportVideoButton);
 
-accordion.add(ui.Panel([panel_6_title, panel_6_content], ui.Panel.Layout.flow('vertical'), {
+accordion.add(ui.Panel([panel_7_title, panel_7_content], ui.Panel.Layout.flow('vertical'), {
   backgroundColor:'#ecf0f1', padding:'8px', border:'1px solid #bdc3c7', margin:'5px 0'
 }));
 
@@ -360,6 +393,7 @@ function trainModel() {
   panel_4_content.style().set('shown', true);
   panel_5_content.style().set('shown', true);
   panel_6_content.style().set('shown', true);
+  panel_7_content.style().set('shown', true);
 
   createLegend();
   updateMap(yearSelect.getValue());
@@ -979,6 +1013,262 @@ chartTypeSelect.onChange(function(value) {
   chartYearSelect.style().set('shown', needsOneYear);
 });
 
+// Future Prediction Functions
+function buildTransitionMatrix(fromImage, toImage) {
+  var combined = fromImage.multiply(10).add(toImage).rename('transition');
+  var histogram = ee.Dictionary(combined.reduceRegion({
+    reducer: ee.Reducer.frequencyHistogram(),
+    geometry: aoi,
+    scale: SCALE,
+    maxPixels: 1e9,
+    tileScale: 4,
+    bestEffort: true
+  }).get('transition'));
+
+  var classList = ee.List.sequence(1, names.length);
+  var matrix = classList.map(function(fromClass) {
+    fromClass = ee.Number(fromClass);
+    var rowCounts = classList.map(function(toClass) {
+      toClass = ee.Number(toClass);
+      var key = fromClass.multiply(10).add(toClass).format();
+      return ee.Number(histogram.get(key, 0));
+    });
+
+    var rowSum = ee.Number(ee.List(rowCounts).reduce(ee.Reducer.sum()));
+    var normalizedRow = ee.Algorithms.If(
+      rowSum.gt(0),
+      ee.List(rowCounts).map(function(count) { return ee.Number(count).divide(rowSum); }),
+      classList.map(function(toClass) { return ee.Number(toClass).eq(fromClass); })
+    );
+    return normalizedRow;
+  });
+
+  return ee.List(matrix);
+}
+
+function blendTransitionMatrices(matrixA, matrixB, weightA, weightB) {
+  var classList = ee.List.sequence(0, names.length - 1);
+  return classList.map(function(rowIdx) {
+    rowIdx = ee.Number(rowIdx);
+    var rowA = ee.List(matrixA.get(rowIdx));
+    var rowB = ee.List(matrixB.get(rowIdx));
+    return classList.map(function(colIdx) {
+      colIdx = ee.Number(colIdx);
+      var aVal = ee.Number(rowA.get(colIdx));
+      var bVal = ee.Number(rowB.get(colIdx));
+      return aVal.multiply(weightA).add(bVal.multiply(weightB));
+    });
+  });
+}
+
+function buildSuitabilityMaps(referenceImage) {
+  var ndvi = referenceImage.select('NDVI').unitScale(-0.2, 0.8).clamp(0, 1);
+  var evi = referenceImage.select('EVI').unitScale(-0.1, 0.7).clamp(0, 1);
+  var ndbi = referenceImage.select('NDBI').unitScale(-0.4, 0.5).clamp(0, 1);
+  var mndwi = referenceImage.select('MNDWI').unitScale(-0.5, 0.6).clamp(0, 1);
+  var bsi = referenceImage.select('BSI').unitScale(-0.3, 0.5).clamp(0, 1);
+  var ui = referenceImage.select('UI').unitScale(-0.4, 0.5).clamp(0, 1);
+
+  var inv = function(img) { return ee.Image(1).subtract(img); };
+
+  var waterSuit = mndwi.multiply(0.65).add(inv(ndbi).multiply(0.2)).add(inv(bsi).multiply(0.15)).clamp(0, 1);
+  var vegetationSuit = ndvi.multiply(0.55).add(evi.multiply(0.35)).add(inv(ndbi).multiply(0.10)).clamp(0, 1);
+  var urbanSuit = ndbi.multiply(0.45).add(ui.multiply(0.35)).add(inv(ndvi).multiply(0.20)).clamp(0, 1);
+  var cultivationSuit = ndvi.multiply(0.45).add(inv(bsi).multiply(0.25)).add(inv(mndwi).multiply(0.15)).add(inv(ui).multiply(0.15)).clamp(0, 1);
+  var sandSuit = bsi.multiply(0.5).add(inv(ndvi).multiply(0.3)).add(inv(mndwi).multiply(0.2)).clamp(0, 1);
+  var bareSuit = bsi.multiply(0.5).add(ui.multiply(0.25)).add(inv(ndvi).multiply(0.25)).clamp(0, 1);
+
+  // Keep class suitability in a fixed index order: class 1 at index 0, class 2 at index 1, etc.
+  return ee.List([
+    vegetationSuit,
+    waterSuit,
+    urbanSuit,
+    cultivationSuit,
+    sandSuit,
+    bareSuit
+  ]);
+}
+
+function projectOneStepMarkov(currentImage, transitionMatrix, suitabilityList) {
+  var preparedCurrent = currentImage
+    .unmask(currentImage.focal_mode({radius: 2, units: 'pixels'}))
+    .unmask(4)
+    .rename('LULC')
+    .toByte();
+
+  var classList = ee.List.sequence(1, names.length);
+  var scoreBands = classList.map(function(targetClass) {
+    targetClass = ee.Number(targetClass);
+    var rowIdx = targetClass.subtract(1);
+
+    var transitionToTarget = classList.map(function(fromClass) {
+      fromClass = ee.Number(fromClass);
+      var row = ee.List(transitionMatrix.get(fromClass.subtract(1)));
+      return ee.Number(row.get(rowIdx));
+    });
+
+    var transitionScore = preparedCurrent.remap(classList, transitionToTarget);
+    var suitability = ee.Image(suitabilityList.get(targetClass.subtract(1)))
+      .unmask(ee.Image(suitabilityList.get(targetClass.subtract(1))).focal_mean({radius: 2, units: 'pixels'}))
+      .unmask(0.5)
+      .clamp(0, 1);
+    var neighborhood = preparedCurrent.eq(targetClass).focal_mean({radius: 1, units: 'pixels'});
+    var persistence = preparedCurrent.eq(targetClass).multiply(0.08);
+
+    var score = transitionScore.multiply(0.62)
+      .add(suitability.multiply(0.28))
+      .add(neighborhood.multiply(0.10))
+      .add(persistence)
+      .rename(ee.String('score_').cat(targetClass.format('%.0f')));
+
+    return score;
+  });
+
+  var stacked = ee.ImageCollection.fromImages(scoreBands).toBands();
+  var predicted = stacked.toArray().arrayArgmax().arrayGet([0]).add(1).rename('LULC').toByte();
+
+  // Keep map patterns spatially coherent and reduce isolated single-pixel artifacts.
+  return predicted.focal_mode({radius: 1, units: 'pixels', iterations: 1}).rename('LULC').toByte().clip(aoi);
+}
+
+function backtestPredictionAccuracy(actualImage, predictedImage) {
+  var sample = actualImage.unmask(0).rename('actual').addBands(predictedImage.unmask(0).rename('predicted')).sample({
+    region: aoi,
+    scale: SCALE,
+    numPixels: 6000,
+    seed: 42,
+    geometries: false,
+    tileScale: 4
+  });
+
+  return {
+    sample: sample,
+    matrix: sample.errorMatrix('actual', 'predicted')
+  };
+}
+
+function calculateStatsInPanel(image, year, panelToUse) {
+  panelToUse.clear();
+  panelToUse.add(ui.Label('Loading predicted stats for ' + year + '...'));
+
+  var areaImage = ee.Image.pixelArea().divide(10000).addBands(image);
+  var stats = areaImage.reduceRegion({
+    reducer: ee.Reducer.sum().group({groupField:1, groupName:'class'}),
+    geometry: aoi,
+    scale: SCALE,
+    maxPixels: 1e9,
+    tileScale: 4
+  });
+
+  stats.evaluate(function(result) {
+    panelToUse.clear();
+    panelToUse.add(ui.Label('Predicted Area by Class (Hectares)', {fontWeight:'bold'}));
+    if (result && result.groups) {
+      var total = 0;
+      result.groups.forEach(function(g) {
+        var idx = g['class'] - 1;
+        var nm = names[idx] || ('Class ' + g['class']);
+        var ar = g.sum || 0;
+        total += ar;
+        panelToUse.add(ui.Label(nm + ': ' + ar.toFixed(2) + ' ha'));
+      });
+      panelToUse.add(ui.Label('Total Area: ' + total.toFixed(2) + ' ha', {fontWeight:'bold', margin:'5px 0 0 0'}));
+    } else {
+      panelToUse.add(ui.Label('No predicted data available for ' + year));
+    }
+  });
+}
+
+function generateFuturePredictions() {
+  if (!appState.lulcCollection) {
+    predictionStatus.setValue('❌ Train the model first (Panel 1).');
+    return;
+  }
+
+  predictionStatus.setValue('Generating future predictions with CA-Markov logic...');
+  predictionStatsPanel.clear();
+  predictionStatsPanel.add(ui.Label('Running transition model and validation...'));
+
+  var lulc2015 = appState.lulcCollection.filter(ee.Filter.eq('year', 2015)).first();
+  var lulc2020 = appState.lulcCollection.filter(ee.Filter.eq('year', 2020)).first();
+  var lulc2025 = appState.lulcCollection.filter(ee.Filter.eq('year', 2025)).first();
+  var suitabilityImage = getImageryForYear(2025);
+
+  var transitionA = buildTransitionMatrix(lulc2015, lulc2020);
+  var transitionB = buildTransitionMatrix(lulc2020, lulc2025);
+  var blendedTransition = blendTransitionMatrices(transitionA, transitionB, 0.35, 0.65);
+  var suitability = buildSuitabilityMaps(suitabilityImage);
+
+  var pred2030 = projectOneStepMarkov(lulc2025, blendedTransition, suitability)
+    .set('year', 2030, 'system:time_start', ee.Date.fromYMD(2030, 1, 1));
+  var pred2035 = projectOneStepMarkov(pred2030, blendedTransition, suitability)
+    .set('year', 2035, 'system:time_start', ee.Date.fromYMD(2035, 1, 1));
+  var pred2040 = projectOneStepMarkov(pred2035, blendedTransition, suitability)
+    .set('year', 2040, 'system:time_start', ee.Date.fromYMD(2040, 1, 1));
+  var pred2045 = projectOneStepMarkov(pred2040, blendedTransition, suitability)
+    .set('year', 2045, 'system:time_start', ee.Date.fromYMD(2045, 1, 1));
+  var pred2050 = projectOneStepMarkov(pred2045, blendedTransition, suitability)
+    .set('year', 2050, 'system:time_start', ee.Date.fromYMD(2050, 1, 1));
+
+  // Back-test one step ahead (2020 -> 2025) to report expected forecast reliability.
+  var test2025 = projectOneStepMarkov(lulc2020, transitionA, suitability);
+  var validation = backtestPredictionAccuracy(lulc2025, test2025);
+  var validationMatrix = validation.matrix;
+
+  appState.futureLulcCollection = ee.ImageCollection([pred2030, pred2040, pred2050]);
+  validation.sample.size().evaluate(function(sampleCount) {
+    if (!sampleCount || sampleCount <= 0) {
+      appState.futureValidation = { overallAccuracy: null, kappa: null };
+      predictionStatus.setValue('✅ Predictions ready. Validation unavailable (no valid sample pixels).');
+      predictionStatsPanel.clear();
+      predictionStatsPanel.add(ui.Label('Forecast Validation', {fontWeight: 'bold'}));
+      predictionStatsPanel.add(ui.Label('Validation unavailable due to missing sample pixels.'));
+      predictionStatsPanel.add(ui.Label('Select a future year and click "Show Predicted Map".'));
+      return;
+    }
+
+    validationMatrix.accuracy().evaluate(function(acc) {
+      validationMatrix.kappa().evaluate(function(kappa) {
+        var validAcc = (acc !== null && !isNaN(acc));
+        var validKappa = (kappa !== null && !isNaN(kappa));
+
+        appState.futureValidation = {
+          overallAccuracy: validAcc ? acc : null,
+          kappa: validKappa ? kappa : null
+        };
+
+        var accPct = validAcc ? (acc * 100).toFixed(2) : 'N/A';
+        var kappaText = validKappa ? Number(kappa).toFixed(3) : 'N/A';
+        predictionStatus.setValue('✅ Predictions ready. Back-test accuracy: ' + accPct + '% (Kappa: ' + kappaText + ').');
+
+        predictionStatsPanel.clear();
+        predictionStatsPanel.add(ui.Label('Forecast Validation (2025 back-test)', {fontWeight: 'bold'}));
+        predictionStatsPanel.add(ui.Label('Validation sample size: ' + sampleCount));
+        predictionStatsPanel.add(ui.Label('Overall Accuracy: ' + accPct + '%'));
+        predictionStatsPanel.add(ui.Label('Kappa: ' + kappaText));
+        predictionStatsPanel.add(ui.Label('Select a future year and click "Show Predicted Map".'));
+      });
+    });
+  });
+}
+
+function showFuturePrediction() {
+  if (!appState.futureLulcCollection) {
+    predictionStatus.setValue('❌ Click "Generate Predictions" first.');
+    return;
+  }
+
+  var year = parseInt(predictionYearSelect.getValue(), 10);
+  var predictionImage = appState.futureLulcCollection.filter(ee.Filter.eq('year', year)).first();
+
+  while (mapPanel.layers().length() > 1) {
+    mapPanel.layers().remove(mapPanel.layers().get(1));
+  }
+
+  mapPanel.addLayer(predictionImage, {min:1, max:names.length, palette:palette}, 'Predicted LULC ' + year);
+  calculateStatsInPanel(predictionImage, year, predictionStatsPanel);
+}
+
 // Inspector and Export Functions
 function inspectMap(coords) {
   if (!appState.currentLulc || !appState.currentImage) return;
@@ -1103,6 +1393,13 @@ print('5) Check Panel 5 for advanced charts!');
 
 var instructions = ui.Panel([
   ui.Label('📋 GETTING STARTED', {fontWeight:'bold', fontSize:'16px', margin:'10px 0'}),
+  ui.Label('Method used: ERDAS IMAGINE-style LULC workflow + CA-Markov prediction', {fontWeight:'bold'}),
+  ui.Label('• Preprocess satellite imagery'),
+  ui.Label('• Collect and split training samples'),
+  ui.Label('• Run supervised classification (RF/SVM/CART)'),
+  ui.Label('• Assess accuracy (OA, Kappa, confusion matrix)'),
+  ui.Label('• Detect land-cover change across years'),
+  ui.Label('• Predict future maps using CA-Markov logic'),
   ui.Label('1. Import your training data first'),
   ui.Label('2. Click "Train Model" in Panel 1'),
   ui.Label('3. Wait for processing to complete'),
@@ -1112,3 +1409,22 @@ var instructions = ui.Panel([
   backgroundColor:'#e8f4fd', padding:'10px', border:'1px solid #3498db', margin:'10px 5px'
 });
 mainPanel.insert(1, instructions);
+
+var methodologyPanel = ui.Panel([
+  ui.Label('🧭 PROJECT METHODOLOGY', {fontWeight:'bold', fontSize:'16px', margin:'10px 0'}),
+  ui.Label('This project follows an ERDAS IMAGINE-compatible LULC prediction workflow:'),
+  ui.Label('1) Satellite image preprocessing and cloud masking'),
+  ui.Label('2) Training sample preparation for supervised learning'),
+  ui.Label('3) Multi-class LULC mapping with RF/SVM/CART'),
+  ui.Label('4) Accuracy assessment using confusion matrix and Kappa'),
+  ui.Label('5) Time-series change detection and transition analysis'),
+  ui.Label('6) Future land-use prediction using CA-Markov simulation')
+], ui.Panel.Layout.flow('vertical'), {
+  backgroundColor:'#f6f9ef',
+  padding:'10px',
+  border:'1px solid #9dbb61',
+  margin:'0 5px 10px 5px'
+});
+mainPanel.insert(2, methodologyPanel);
+
+print('🧭 Workflow configured for ERDAS IMAGINE-style LULC prediction.');
