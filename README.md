@@ -1,4 +1,7 @@
+<div align="center">
 
+
+<br/><br/>
 
 # 🌍 Multi-Temporal LULC App
 
@@ -265,6 +268,6 @@ You can update this section if you use a different license.
 
 <br/><br/>
 
-**Built by Prithwiraj Das.**
+**Built for reproducible geospatial analysis and decision-support planning.**
 
 </div>
