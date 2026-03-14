@@ -1,11 +1,13 @@
 <div align="center">
 
-
-<br/><br/>
-
 # 🌍 Multi-Temporal LULC App
 
-### Google Earth Engine workflow for Land Use / Land Cover mapping, change analysis, and CA-Markov forecasting
+<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&size=30&duration=3000&pause=1000&color=00FF41&center=true&vCenter=true&width=1000&lines=Multi-Temporal+LULC+App;Google+Earth+Engine+%7C+CA-Markov+Forecasting;Land+Cover+Mapping+%7C+1995+%E2%86%92+2050;By%20Prithwiraj%20Das" />
+
+<br>
+
+<br/>
+
 
 <br/>
 
