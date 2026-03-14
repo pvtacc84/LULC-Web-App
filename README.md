@@ -1,187 +1,270 @@
-# 🌍 Multi-Temporal Land Use / Land Cover (LULC) Classification App
 
-A **powerful, interactive Google Earth Engine (GEE) application** for **multi-temporal Land Use / Land Cover (LULC) analysis**, combining **machine learning, satellite imagery, change detection, and advanced visual analytics** in a single unified interface.
 
-This project enables users to **train custom classifiers**, analyze **long-term land dynamics**, perform **change detection**, generate **trend & advanced charts**, inspect **pixel-level indices**, and **export results** — all directly inside the Earth Engine Code Editor.
+# 🌍 Multi-Temporal LULC App
 
----
+### Google Earth Engine workflow for Land Use / Land Cover mapping, change analysis, and CA-Markov forecasting
 
-## ✨ Key Features
+<br/>
 
-### 🧠 Machine Learning–Based Classification
+<img src="https://img.shields.io/badge/📅%20Historical-1995%20→%202025-00897B?style=flat-square&labelColor=0a2e1a" />
+<img src="https://img.shields.io/badge/🔮%20Future-2030%20·%202040%20·%202050-6A1B9A?style=flat-square&labelColor=1a0a2e" />
+<img src="https://img.shields.io/badge/📐%20Resolution-30m%20Spatial-455A64?style=flat-square" />
+<img src="https://img.shields.io/badge/🗂%20Classes-6%20LULC-5D4037?style=flat-square" />
 
-* Supports **Random Forest**, **SVM**, and **CART** classifiers
-* Trains on **user-provided ground truth samples**
-* Uses **multi-sensor data fusion** (Landsat 5, 7, 8 & Sentinel‑2)
-* Automatically computes spectral indices:
+<br/>
 
-  * NDVI, EVI, NDBI, MNDWI, BSI, UI
+<img src="https://img.shields.io/badge/🛰%20Sensors-Landsat%205%2F7%2F8%20+%20Sentinel--2-1976D2?style=flat-square&labelColor=0d1f3c" />
+<img src="https://img.shields.io/badge/📊%20Indices-NDVI%20·%20EVI%20·%20NDBI%20·%20MNDWI%20·%20BSI%20·%20UI-00695C?style=flat-square" />
+<img src="https://img.shields.io/badge/✓%20Accuracy-OA%20+%20Kappa%20+%20Confusion%20Matrix-1565C0?style=flat-square" />
 
-### ⏳ Multi‑Temporal Analysis
+<br/>
 
-* Classifies LULC across multiple years (1995–2025)
-* Generates consistent, comparable LULC maps for each year
-* Handles data gaps and cloud masking automatically
+<img src="https://img.shields.io/badge/💾%20Export-SHP%20·%20GeoTIFF%20·%20MP4-F9A825?style=flat-square" />
+<img src="https://img.shields.io/badge/🔄%20CA--Markov-Transition%20·%20Suitability%20·%20Projection-7B1FA2?style=flat-square" />
+<img src="https://img.shields.io/badge/📉%20Change-Detection%20+%20Trend%20Charts-C62828?style=flat-square" />
 
-### 🔄 Change Detection
+<br/>
 
-* Quantifies **class-wise area change** between any two years
-* Identifies **major land-use transitions**
-* Computes net gain/loss (in hectares)
+<img src="https://img.shields.io/badge/Status-Research%20Ready-1B5E20?style=flat-square" />
+<img src="https://img.shields.io/badge/License-MIT-black?style=flat-square" />
 
-### 📈 Advanced Visual Analytics
-
-* Time‑series trend charts (LULC area vs year)
-* Stacked area charts for land composition
-* Change matrices (top transitions)
-* NDVI distribution by LULC class
-* Classification confidence & net change charts
-
-### 🗺️ Interactive Map Tools
-
-* Pixel-level **LULC + spectral index inspector**
-* Dynamic legends and statistics panel
-* Click‑based spatial exploration
-
-### 📤 Export Capabilities
-
-* Export LULC rasters (GeoTIFF)
-* Export individual classes as **Shapefiles**
-* Generate **time‑lapse animation videos (GIF/MP4)**
+</div>
 
 ---
 
-## 🛰️ Data Sources
+## 📋 Table of Contents
 
-| Sensor           | Usage Period   |
-| ---------------- | -------------- |
-| Landsat 5 (TM)   | 1995 – 2011    |
-| Landsat 7 (ETM+) | 1999 – 2013    |
-| Landsat 8 (OLI)  | 2013 – Present |
-| Sentinel‑2 (SR)  | 2017 – Present |
-
-All imagery is **surface reflectance**, cloud‑masked, scaled, and harmonized.
-
----
-
-## 🧪 Spectral Indices Used
-
-* **NDVI** – Vegetation health
-* **EVI** – Enhanced vegetation signal
-* **NDBI** – Built‑up detection
-* **MNDWI** – Water bodies
-* **BSI** – Bare soil
-* **UI** – Urban intensity
-
-These indices significantly improve class separability.
+| # | Section |
+|---|---------|
+| 1 | [Overview](#-overview) |
+| 2 | [Project Highlights](#-project-highlights) |
+| 3 | [Workflow At A Glance](#-workflow-at-a-glance) |
+| 4 | [Land Cover Schema](#-land-cover-schema) |
+| 5 | [Project Structure](#-project-structure) |
+| 6 | [Requirements](#-requirements) |
+| 7 | [Prepare Your Input Data](#-prepare-your-input-data) |
+| 8 | [How To Run](#-how-to-run) |
+| 9 | [Panels And Features](#-panels-and-features) |
+| 10 | [Future Prediction — CA-Markov](#-future-prediction--ca-markov) |
+| 11 | [Exports](#-exports) |
+| 12 | [Methodology Summary](#-methodology-summary) |
+| 13 | [Limitations And Notes](#-limitations-and-notes) |
+| 14 | [Citation Template](#-citation-template) |
+| 15 | [License](#-license) |
 
 ---
 
-## 🧩 LULC Classes
+## 🌍 Overview
 
-| Class Value | Class Name  |
-| ----------- | ----------- |
-| 1           | Vegetation  |
-| 2           | Water       |
-| 3           | Urban Area  |
-| 4           | Cultivation |
-| 5           | Sand        |
-| 6           | Bare Land   |
+This project builds a complete **multi-temporal LULC analysis system** in Google Earth Engine with an interactive UI. It supports supervised classification, temporal comparison, trend visualization, and future LULC simulation.
+
+The implementation is designed to follow an **ERDAS IMAGINE-style** analytical flow while running fully in Earth Engine — from cloud-masked composites all the way through to CA-Markov projections.
 
 ---
 
-## 🚀 How to Use
+## ✨ Project Highlights
 
-### 1️⃣ Import Required Assets
-
-Import the following FeatureCollections into GEE:
-
-* `aoi`
-* `water`
-* `cultivations`
-* `vegetations`
-* `Urban_area`
-* `sand`
-* `bare`
-
-Each training dataset must contain a `class` property.
-
-### 2️⃣ Run the Script
-
-* Paste the full script into **Google Earth Engine Code Editor**
-* Click **Run**
-
-### 3️⃣ Train the Model
-
-* Open **Panel 1**
-* Select classifier
-* Click **Train Model**
-
-### 4️⃣ Explore Results
-
-* View classified maps by year
-* Analyze statistics, trends & changes
-* Inspect pixel‑level indices
-
-### 5️⃣ Export Outputs
-
-* Download rasters, vectors, or animations via **Panel 6**
+- 🛰 **Multi-sensor preprocessing pipeline** — Landsat 5/7/8 and Sentinel-2
+- 📊 **Feature engineering** — NDVI, EVI, NDBI, MNDWI, BSI, and UI spectral indices
+- 🤖 **Supervised classifiers** — Random Forest, SVM, and CART
+- ✅ **Integrated accuracy assessment** — Overall Accuracy, Kappa, and confusion matrix
+- 📅 **Time-series LULC mapping** — 1995 to 2025
+- 📉 **Change detection** — class-wise area delta reporting
+- 📈 **Trend and advanced charting suite** — stacked area, transitions, NDVI by class, net change bars
+- 🔮 **Future LULC projection** — 2030, 2040, and 2050 using CA-Markov logic
+- 💾 **Export options** — Vector (SHP), Raster (GeoTIFF), and Animation (MP4)
 
 ---
 
-## 🖥️ Application Structure
+## 🔄 Workflow At A Glance
 
-* **Panel 1** – Model configuration & training
-* **Panel 2** – Year-wise LULC explorer
-* **Panel 3** – Change detection
-* **Panel 4** – Trend analysis
-* **Panel 5** – Advanced charts
-* **Panel 6** – Inspector & export tools
-
----
-
-## 📊 Accuracy Assessment
-
-* Automatic **train/test split (80/20)**
-* Confusion matrix visualization
-* Overall accuracy & Kappa coefficient
-
-Ensures reliable and interpretable classification results.
-
----
-
-## ⚙️ Technical Highlights
-
-* Cloud masking (QA_PIXEL, QA60)
-* Sensor‑independent band harmonization
-* Tile‑scaled reducers for large AOIs
-* Robust handling of missing imagery
+```
+Satellite Collection ──► Cloud / Quality Masking ──► Spectral Harmonization
+        │
+        ▼
+Index Generation (NDVI · EVI · NDBI · MNDWI · BSI · UI)
+        │
+        ▼
+Model Training (RF / SVM / CART) ──► Historical LULC Mapping ──► Accuracy Assessment
+        │
+        ▼
+Change & Trend Analysis ──► CA-Markov Projection (2030 · 2040 · 2050)
+        │
+        ▼
+Export & Reporting (SHP · GeoTIFF · MP4)
+```
 
 ---
 
-## 🧑‍💻 Ideal For
+## 🗺 Land Cover Schema
 
-* Remote sensing research
-* Urban growth analysis
-* Environmental monitoring
-* Academic projects & theses
-* Government & planning studies
+<div align="center">
 
----
+| Class ID | Class Name | Color Swatch | Hex Code |
+|:--------:|------------|:------------:|----------|
+| **1** | 🟢 Vegetation | ![#0db21f](https://img.shields.io/badge/▓▓▓▓▓▓-0db21f?style=flat-square&color=0db21f&label=) | `#0db21f` |
+| **2** | 🩵 Water | ![#1cece0](https://img.shields.io/badge/▓▓▓▓▓▓-1cece0?style=flat-square&color=1cece0&label=) | `#1cece0` |
+| **3** | 🔴 Urban Area | ![#ff0000](https://img.shields.io/badge/▓▓▓▓▓▓-ff0000?style=flat-square&color=ff0000&label=) | `#ff0000` |
+| **4** | 🟩 Cultivation | ![#00ff00](https://img.shields.io/badge/▓▓▓▓▓▓-00ff00?style=flat-square&color=00ff00&label=) | `#00ff00` |
+| **5** | 🟡 Sand | ![#f0f015](https://img.shields.io/badge/▓▓▓▓▓▓-f0f015?style=flat-square&color=f0f015&label=) | `#f0f015` |
+| **6** | 🟫 Bare Land | ![#979a5d](https://img.shields.io/badge/▓▓▓▓▓▓-979a5d?style=flat-square&color=979a5d&label=) | `#979a5d` |
 
-## 📌 Future Enhancements
-
-* Deep learning classifiers
-* Accuracy per class visualization
-* Time‑aware change trajectory analysis
-* Web deployment (GEE Apps / App Engine)
+</div>
 
 ---
 
-## 📜 License
+## 📁 Project Structure
 
-This project is released for **academic and research use**. Feel free to modify and extend with proper attribution.
+```
+GEE project/
+├── gee.js        # Main / alternate app script
+├── low_acc.js    # Full-featured script (training, charts, CA-Markov forecasting)
+└── README.md     # This file
+```
 
 ---
 
-### ⭐ If you find this project useful, consider starring or citing it in your research!
+## ✅ Requirements
+
+> Before running, make sure all of the following are in place:
+
+- ☑ Google Earth Engine account
+- ☑ Earth Engine Code Editor access
+- ☑ Imported training assets with correct class labels
+- ☑ AOI geometry available in the script context
+- ☑ Sample FeatureCollections per class available in the script context
+
+---
+
+## 🗃 Prepare Your Input Data
+
+Before pressing **Train Model**, import these objects in the Code Editor left panel:
+
+```js
+// Required imports — each must include a numeric `class` property (1–6)
+aoi           // Study area polygon
+water         // Training samples – Water       (class: 2)
+cultivations  // Training samples – Cultivation (class: 4)
+vegetations   // Training samples – Vegetation  (class: 1)
+Urban_area    // Training samples – Urban Area  (class: 3)
+sand          // Training samples – Sand        (class: 5)
+bare          // Training samples – Bare Land   (class: 6)
+```
+
+> **Note:** Each training collection must include a numeric `class` property matching the Land Cover Schema IDs above.
+
+---
+
+## 🚀 How To Run
+
+**Step 1** — Open the [Google Earth Engine Code Editor](https://code.earthengine.google.com)
+
+**Step 2** — Paste content from `low_acc.js` (or `gee.js` if preferred)
+
+**Step 3** — Import your AOI and all class training assets in the **left panel**
+
+**Step 4** — Click **Run** to initialize the application
+
+**Step 5** — In **Panel 1**, choose your classifier (RF / SVM / CART) and click **Train Model**
+
+**Step 6** — After processing, use **Panels 2–7** for analysis, prediction, and export
+
+---
+
+## 🖥 Panels And Features
+
+<div align="center">
+
+| Panel | Title | Purpose |
+|:-----:|-------|---------|
+| **1** | 🔧 Configure & Train Model | Select classifier (RF/SVM/CART), train model, review OA / Kappa / confusion matrix |
+| **2** | 📅 Time-Series Explorer | View yearly LULC maps and class-wise area statistics (1995–2025) |
+| **3** | 📉 Change Detection | Compare two years; inspect per-class area gain / loss |
+| **4** | 📈 Trend Analysis | Generate LULC area-over-time line chart for all classes |
+| **5** | 📊 Advanced Charts | Stacked area, transition summaries, class distributions, NDVI by class, net change bars |
+| **6** | 🔮 Future Prediction | Projected maps for 2030 / 2040 / 2050 using CA-Markov simulation with back-test validation |
+| **7** | 🔍 Inspector & Export | Pixel-level inspection; export to SHP, GeoTIFF, and time-lapse MP4 video |
+
+</div>
+
+---
+
+## 🔮 Future Prediction — CA-Markov
+
+The future module combines historical transition behavior with spectral suitability and neighborhood context.
+
+### ▶ Core Steps
+
+| Step | Action |
+|------|--------|
+| **1** | Build transition matrices from `2015 → 2020` and `2020 → 2025` |
+| **2** | Blend matrices with weighted emphasis on recent behavior |
+| **3** | Construct class-wise suitability maps from 2025 spectral indices |
+| **4** | Run iterative one-step projection → produce **2030**, **2040**, and **2050** maps |
+| **5** | Apply focal smoothing to reduce isolated pixel artifacts |
+
+### ✓ Back-Test Validation
+
+- Predicts **2025** from **2020** as a one-step back-test
+- Computes error matrix, Overall Accuracy, and Kappa coefficient
+- Displays validation sample size in the prediction panel
+
+---
+
+## 💾 Exports
+
+| Type | Format | Description |
+|------|--------|-------------|
+| 🗺 **Vector** | `.SHP` | Class mask exported as Shapefile |
+| 🖼 **Raster** | `.GeoTIFF` | Current LULC map at 30m resolution |
+| 🎬 **Video** | `.MP4` | Time-series map animation (Google Drive task) |
+
+---
+
+## 📖 Methodology Summary
+
+> This project implements a supervised multi-temporal LULC workflow in Google Earth Engine, integrating cloud-masked optical composites, spectral index engineering, and RF/SVM/CART classification with confusion-matrix-based validation. Historical transition probabilities and suitability factors are then used in a **CA-Markov style model** to simulate future LULC scenarios for **2030**, **2040**, and **2050**.
+
+---
+
+## ⚠ Limitations And Notes
+
+> [!WARNING]
+> **Forecast outputs** are scenario projections, not deterministic predictions.
+
+> [!CAUTION]
+> **Result quality** is sensitive to training sample quality and class balance.
+
+> [!NOTE]
+> **Transition behavior** may change if future policy or environmental conditions shift significantly.
+
+> [!NOTE]
+> **Cloud-prone regions** can reduce annual composite quality in some years.
+
+---
+
+## 📝 Citation Template
+
+```bibtex
+Author(s). (Year). Multi-Temporal LULC App: Google Earth Engine workflow
+for historical land-cover mapping and CA-Markov-based future simulation.
+```
+
+---
+
+## 📄 License
+
+This project is distributed under the **MIT License**.  
+You can update this section if you use a different license.
+
+---
+
+<div align="center">
+
+<img src="https://img.shields.io/badge/Built%20for-Reproducible%20Geospatial%20Analysis-1B5E20?style=for-the-badge&labelColor=0a2e1a" />
+
+<br/><br/>
+
+**Built by Prithwiraj Das.**
+
+</div>
