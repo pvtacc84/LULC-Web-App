@@ -35,6 +35,25 @@ function processSentinel2(col) {
     .map(function(img){ return img.divide(10000).clamp(0,1).copyProperties(img,['system:time_start']); });
 }
 
+function processSentinel1(col) {
+  // Sentinel-1 provides SAR backscatter (VV & VH). We compute dB and polarization ratio features for classification.
+  // If no SAR data is available for the period, return a constant image with the expected band names.
+  var count = col.size();
+  var base = ee.Image.constant(0).rename(['VV', 'VH']);
+  var median = ee.Image(ee.Algorithms.If(count.gt(0), col.median(), base));
+
+  var vv = median.select('VV');
+  var vh = median.select('VH');
+
+  var vv_db = vv.log10().multiply(10).rename('VV_dB');
+  var vh_db = vh.log10().multiply(10).rename('VH_dB');
+  var ratio = vv.divide(vh).rename('VV_VH_ratio');
+
+  // Add texture metrics to help distinguish urban and crop patterns.
+  var texture = vv.multiply(100).toInt().glcmTexture({size: 3});
+  return ee.Image.cat([vv_db, vh_db, ratio, texture]);
+}
+
 function maskLandsatSR(image) {
   var qaMask = image.select('QA_PIXEL').bitwiseAnd(parseInt('11111',2)).eq(0);
   var saturationMask = image.select('QA_RADSAT').eq(0);
@@ -109,13 +128,24 @@ function getImageryForYear(year) {
   );
 
   var bandCount = ee.Image(composite).bandNames().length();
-  var finalComposite = ee.Image(ee.Algorithms.If(
+  var finalOptical = ee.Image(ee.Algorithms.If(
     bandCount.gt(0),
     addIndices(ee.Image(composite)),
     ee.Image.constant(0).rename('Blue')
   ));
 
-  return finalComposite.set('year', year, 'system:time_start', ee.Date.fromYMD(year, 1, 1));
+  // Add SAR / Sentinel-1 features (VV/VH backscatter, dB, ratio, texture)
+  var sarCollection = ee.ImageCollection('COPERNICUS/S1_GRD')
+    .filterBounds(aoi)
+    .filterDate(startDate, endDate)
+    .filter(ee.Filter.eq('instrumentMode', 'IW'))
+    .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+    .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH'));
+  var sar = processSentinel1(sarCollection).clip(aoi);
+
+  var combined = finalOptical.addBands(sar);
+
+  return combined.set('year', year, 'system:time_start', ee.Date.fromYMD(year, 1, 1));
 }
 
 // App State
@@ -341,6 +371,27 @@ accordion.add(ui.Panel([panel_7_title, panel_7_content], ui.Panel.Layout.flow('v
   backgroundColor:'#ecf0f1', padding:'8px', border:'1px solid #bdc3c7', margin:'5px 0'
 }));
 
+// Panel 8: Flood Monitoring (SAR)
+var panel_8_title = ui.Label('8. Flood Monitoring (SAR)', {fontWeight:'bold', fontSize:'16px', margin:'5px 0', color:'#34495e'});
+var panel_8_content = ui.Panel();
+panel_8_content.style().set('shown', false);
+
+var floodThresholdSlider = ui.Slider({
+  min: -30, max: 0, value: -18, step: 0.5,
+  style: {margin: '5px 10px', width: '95%'}
+});
+var floodButton = ui.Button('Run Flood Detection', runFloodDetection, false, {width:'90%', margin:'5px auto', backgroundColor:'#2980b9', color:'white'});
+var floodResultsPanel = ui.Panel([ui.Label('Use VV_dB thresholding to highlight potential flooded areas.')], null, {margin:'5px 10px'});
+
+panel_8_content.add(ui.Label('VV_dB Threshold (lower = likely water/flood)', {fontWeight:'bold', margin:'5px 10px'}));
+panel_8_content.add(floodThresholdSlider);
+panel_8_content.add(floodButton);
+panel_8_content.add(floodResultsPanel);
+
+accordion.add(ui.Panel([panel_8_title, panel_8_content], ui.Panel.Layout.flow('vertical'), {
+  backgroundColor:'#ecf0f1', padding:'8px', border:'1px solid #bdc3c7', margin:'5px 0'
+}));
+
 // Core Functions
 function trainModel() {
   modelStatus.setValue('Training... This may take a minute.');
@@ -394,6 +445,7 @@ function trainModel() {
   panel_5_content.style().set('shown', true);
   panel_6_content.style().set('shown', true);
   panel_7_content.style().set('shown', true);
+  panel_8_content.style().set('shown', true);
 
   createLegend();
   updateMap(yearSelect.getValue());
@@ -421,6 +473,24 @@ function calculateAccuracy() {
         .setSeriesNames(cmNames)
         .setOptions({ title:'Confusion Matrix', hAxis:{title:'Predicted'}, vAxis:{title:'Actual'} });
       accuracyPanel.add(cmChart);
+
+      // Feature importance (if supported by the classifier)
+      try {
+        var importance = appState.model.explain().get('importance');
+        importance.evaluate(function(imp) {
+          if (imp && typeof imp === 'object') {
+            var entries = Object.entries(imp).sort(function(a, b) { return b[1] - a[1]; });
+            if (entries.length) {
+              accuracyPanel.add(ui.Label('Feature importance (top features):', {fontWeight:'bold', margin:'5px 0 0 0'}));
+              entries.slice(0, 10).forEach(function(pair) {
+                accuracyPanel.add(ui.Label(pair[0] + ': ' + (pair[1] * 100).toFixed(1) + '%'));
+              });
+            }
+          }
+        });
+      } catch (e) {
+        // Some classifiers may not support explain(); ignore gracefully
+      }
     });
   });
 }
@@ -492,6 +562,43 @@ function calculateStats(image, year) {
     } else {
       statsPanel.add(ui.Label('No data for ' + year));
     }
+  });
+}
+
+function runFloodDetection() {
+  floodResultsPanel.clear();
+  if (!appState.currentImage || !appState.currentLulc) {
+    floodResultsPanel.add(ui.Label('Train the model and select a year first (Panel 2).'));
+    return;
+  }
+
+  var year = parseInt(yearSelect.getValue(), 10);
+  var threshold = floodThresholdSlider.getValue();
+  var vvdb = appState.currentImage.select('VV_dB');
+  var floodMask = vvdb.lt(threshold).selfMask();
+
+  // Update map: keep LULC layer, then overlay flood mask.
+  updateMap(year);
+  mapPanel.addLayer(floodMask, {palette:['0000ff']}, 'Potential Flood (' + year + ')', true, 0.45);
+
+  var areaImage = ee.Image.pixelArea().divide(10000).addBands(floodMask.rename('flood'));
+  var stats = areaImage.reduceRegion({
+    reducer: ee.Reducer.sum(),
+    geometry: aoi,
+    scale: SCALE,
+    maxPixels: 1e9,
+    tileScale: 4
+  });
+
+  stats.evaluate(function(result) {
+    floodResultsPanel.clear();
+    floodResultsPanel.add(ui.Label('Potential Flood Area (hectares)', {fontWeight:'bold'}));
+    if (result && result.flood) {
+      floodResultsPanel.add(ui.Label('Estimated flooded area: ' + result.flood.toFixed(2) + ' ha'));
+    } else {
+      floodResultsPanel.add(ui.Label('No flooded pixels detected at the chosen threshold.'));
+    }
+    floodResultsPanel.add(ui.Label('VV_dB threshold: < ' + threshold.toFixed(1)));
   });
 }
 
@@ -1069,12 +1176,33 @@ function buildSuitabilityMaps(referenceImage) {
   var bsi = referenceImage.select('BSI').unitScale(-0.3, 0.5).clamp(0, 1);
   var ui = referenceImage.select('UI').unitScale(-0.4, 0.5).clamp(0, 1);
 
+  // SAR-based suitability (VV/VH backscatter) helps with urban, water, and crop patterns.
+  var vvdb = referenceImage.select('VV_dB').unitScale(-30, 0).clamp(0, 1);
+  var vhdb = referenceImage.select('VH_dB').unitScale(-30, 0).clamp(0, 1);
+  var vvvh = referenceImage.select('VV_VH_ratio').unitScale(0.5, 2).clamp(0, 1);
+
   var inv = function(img) { return ee.Image(1).subtract(img); };
 
-  var waterSuit = mndwi.multiply(0.65).add(inv(ndbi).multiply(0.2)).add(inv(bsi).multiply(0.15)).clamp(0, 1);
-  var vegetationSuit = ndvi.multiply(0.55).add(evi.multiply(0.35)).add(inv(ndbi).multiply(0.10)).clamp(0, 1);
-  var urbanSuit = ndbi.multiply(0.45).add(ui.multiply(0.35)).add(inv(ndvi).multiply(0.20)).clamp(0, 1);
-  var cultivationSuit = ndvi.multiply(0.45).add(inv(bsi).multiply(0.25)).add(inv(mndwi).multiply(0.15)).add(inv(ui).multiply(0.15)).clamp(0, 1);
+  var waterSuit = mndwi.multiply(0.55)
+    .add(inv(vvdb).multiply(0.25))
+    .add(inv(ndbi).multiply(0.1))
+    .add(inv(bsi).multiply(0.1))
+    .clamp(0, 1);
+  var vegetationSuit = ndvi.multiply(0.45)
+    .add(evi.multiply(0.25))
+    .add(vhdb.multiply(0.2))
+    .add(inv(ndbi).multiply(0.1))
+    .clamp(0, 1);
+  var urbanSuit = ndbi.multiply(0.35)
+    .add(ui.multiply(0.25))
+    .add(vvdb.multiply(0.25))
+    .add(vvvh.multiply(0.15))
+    .clamp(0, 1);
+  var cultivationSuit = ndvi.multiply(0.4)
+    .add(inv(bsi).multiply(0.25))
+    .add(vhdb.multiply(0.2))
+    .add(inv(ui).multiply(0.15))
+    .clamp(0, 1);
   var sandSuit = bsi.multiply(0.5).add(inv(ndvi).multiply(0.3)).add(inv(mndwi).multiply(0.2)).clamp(0, 1);
   var bareSuit = bsi.multiply(0.5).add(ui.multiply(0.25)).add(inv(ndvi).multiply(0.25)).clamp(0, 1);
 
@@ -1394,12 +1522,13 @@ print('5) Check Panel 5 for advanced charts!');
 var instructions = ui.Panel([
   ui.Label('📋 GETTING STARTED', {fontWeight:'bold', fontSize:'16px', margin:'10px 0'}),
   ui.Label('Method used: ERDAS IMAGINE-style LULC workflow + CA-Markov prediction', {fontWeight:'bold'}),
-  ui.Label('• Preprocess satellite imagery'),
+  ui.Label('• Preprocess satellite imagery (optical + SAR)'),
   ui.Label('• Collect and split training samples'),
   ui.Label('• Run supervised classification (RF/SVM/CART)'),
   ui.Label('• Assess accuracy (OA, Kappa, confusion matrix)'),
   ui.Label('• Detect land-cover change across years'),
   ui.Label('• Predict future maps using CA-Markov logic'),
+  ui.Label('• Use SAR (Sentinel-1 / NISAR) for all-weather mapping and flood monitoring'),
   ui.Label('1. Import your training data first'),
   ui.Label('2. Click "Train Model" in Panel 1'),
   ui.Label('3. Wait for processing to complete'),
@@ -1413,7 +1542,7 @@ mainPanel.insert(1, instructions);
 var methodologyPanel = ui.Panel([
   ui.Label('🧭 PROJECT METHODOLOGY', {fontWeight:'bold', fontSize:'16px', margin:'10px 0'}),
   ui.Label('This project follows an ERDAS IMAGINE-compatible LULC prediction workflow:'),
-  ui.Label('1) Satellite image preprocessing and cloud masking'),
+  ui.Label('1) Satellite image preprocessing and cloud masking (optical + SAR)'),
   ui.Label('2) Training sample preparation for supervised learning'),
   ui.Label('3) Multi-class LULC mapping with RF/SVM/CART'),
   ui.Label('4) Accuracy assessment using confusion matrix and Kappa'),
