@@ -122,8 +122,7 @@ Export & Reporting (SHP · GeoTIFF · MP4)
 
 ```
 GEE project/
-├── gee.js        # Main / alternate app script
-├── low_acc.js    # Full-featured script (training, charts, CA-Markov forecasting)
+├── LULC.js        # Main 
 └── README.md     # This file
 ```
 
